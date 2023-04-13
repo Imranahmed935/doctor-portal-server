@@ -19,6 +19,9 @@ const client = new MongoClient(uri, {
   serverApi: ServerApiVersion.v1,
 });
 
+// const imgHost = process.env.REACT_APP_imgbb_key;
+// console.log(imgHost);
+
 function verifyJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -40,6 +43,7 @@ async function run() {
     const servicesOptions = client.db("doctorsPortal").collection("services");
     const bookingsOption = client.db("doctorsPortal").collection("bookings");
     const usersOption = client.db("doctorsPortal").collection("users");
+    const doctorsOption = client.db("doctorsPortal").collection("doctors");
 
     app.get("/services", async (req, res) => {
       const query = {};
@@ -60,6 +64,55 @@ async function run() {
       res.send(options);
     });
 
+    app.get("/v2/services", async (req, res) => {
+      const date = req.query.date;
+      const options = await servicesOptions
+        .aggregate([
+          {
+            $lookup: {
+              from: "bookings",
+              localField: "name",
+              foreignField: "treatment",
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: ["$appointment", date],
+                    },
+                  },
+                },
+              ],
+              as: "booked",
+            },
+          },
+          {
+            $project: {
+              name: 1,
+              price: 1,
+              slots: 1,
+              booked: {
+                $map: {
+                  input: "$booked",
+                  as: "book",
+                  in: "$$book.slot",
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              name: 1,
+              price: 1,
+              slots: {
+                $setDifference: ["$slots", "$booked"],
+              },
+            },
+          },
+        ])
+        .toArray();
+      res.send(options);
+    });
+
     app.get("/jwt", async (req, res) => {
       const email = req.query.email;
       const query = { email: email };
@@ -73,6 +126,13 @@ async function run() {
       res.status(403).send({ accessToken: "" });
     });
 
+    app.get("/users/admin/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await usersOption.findOne(query);
+      res.send({ isAdmin: user?.role === "admin" });
+    });
+
     app.post("/users", async (req, res) => {
       const users = req.body;
       const result = await usersOption.insertOne(users);
@@ -83,6 +143,13 @@ async function run() {
       const query = {};
       const result = await usersOption.find(query).toArray();
       res.send(result);
+    });
+
+    app.delete("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const user = await usersOption.deleteOne(query);
+      res.send(user);
     });
 
     app.put("/users/admin/:id", verifyJWT, async (req, res) => {
@@ -101,6 +168,31 @@ async function run() {
         },
       };
       const result = await usersOption.updateOne(filter, updatedDoc, option);
+      res.send(result);
+    });
+
+    app.get("/addPrice", async (req, res) => {
+      const filter = {};
+      const option = { upsert: true };
+      const updatedDoc = {
+        $set: {
+          price: 99,
+        },
+      };
+      const result = await servicesOptions.updateMany(
+        filter,
+        updatedDoc,
+        option
+      );
+      res.send(result);
+    });
+
+    app.get("/appointmentSpecialty", async (req, res) => {
+      const query = {};
+      const result = await servicesOptions
+        .find(query)
+        .project({ name: 1 })
+        .toArray();
       res.send(result);
     });
 
@@ -129,6 +221,25 @@ async function run() {
         return res.send({ acknowledged: false, message });
       }
       const result = await bookingsOption.insertOne(booking);
+      res.send(result);
+    });
+
+    app.get("/doctors", async (req, res) => {
+      const query = {};
+      const doctors = await doctorsOption.find(query).toArray();
+      res.send(doctors);
+    });
+
+    app.post("/doctors", async (req, res) => {
+      const doctor = req.body;
+      const result = await doctorsOption.insertOne(doctor);
+      res.send(result);
+    });
+
+    app.delete("/doctors/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await doctorsOption.deleteOne(query);
       res.send(result);
     });
   } finally {
