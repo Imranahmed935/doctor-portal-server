@@ -47,6 +47,7 @@ async function run() {
     const bookingsOption = client.db("doctorsPortal").collection("bookings");
     const usersOption = client.db("doctorsPortal").collection("users");
     const doctorsOption = client.db("doctorsPortal").collection("doctors");
+    const paymentsOption = client.db("doctorsPortal").collection("payments");
 
     app.get("/services", async (req, res) => {
       const query = {};
@@ -142,22 +143,35 @@ async function run() {
       res.send(result);
     });
 
-    app.post('/create-payment-intent', async(req, res)=>{
+    app.post("/create-payment-intent", async (req, res) => {
       const booking = req.body;
       const price = booking.price;
       const amount = price * 100;
 
       const paymentIntent = await stripe.paymentIntents.create({
-        currency:'usd',
+        currency: "usd",
         amount: amount,
-        'payment_method_types':[
-          'card'
-        ]
+        payment_method_types: ["card"],
       });
       res.send({
         clientSecret: paymentIntent.client_secret,
       });
-    })
+    });
+
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      const result = await paymentsOption.insertOne(payment);
+      const id = payment.bookingId;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          paid: true,
+          transitionId: payment.transitionId,
+        },
+      };
+      const updatedResult = await bookingsOption.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
 
     app.get("/users", async (req, res) => {
       const query = {};
